@@ -2,6 +2,10 @@
 
 openppk is an open-source Python script that interpolates position data from a .MRK file using a corresponding .pos file. It is designed to assist in post-processing kinematic (PPK) data for applications such as surveying, mapping, and geospatial analysis.
 
+**COMING SOON:** Planning to add to the script to export relevant lat,lon,height values to a geo.txt file for ODM or WebODM processing.
+
+We're currently only testing with a DJI Mavic 3E RTK, but this should work with other DJI Enterprise drones or Autel drones that export a .MRK file. 
+
 ## Usage
 
 1. Place the openppk.py script in the same directory as your .pos file from RTKPOST or RNX2RTKP - along with a subdirectory pasted from your drone mission, which contains the .MRK file and images.
