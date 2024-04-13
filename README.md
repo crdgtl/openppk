@@ -1,14 +1,14 @@
 # openppk
 
-openppk is an open-source Python script that interpolates position data from a .MRK file using a corresponding .pos file. It is designed to assist in post-processing kinematic (PPK) data for applications such as surveying, mapping, and geospatial analysis.
+openppk is an open-source Python script that interpolates position data from a .pos file using a corresponding .MRK file. It is designed to assist in post-processing kinematic (PPK) data for applications such as surveying, mapping, and geospatial analysis.
 
 The benefit of this tool is being able to PPK process images, in state plane coordinate zones, from command line, with orientation data captured. Being available as a command line tool gives a lot of opportunity for creating web apps or simple to use versions, and automation.
 
-**BETA:** We are currently testing locally on Windows. There are hard paths for things like exiftool that need to be fixed to run universally.
-
-**NEW FEATURE:** The script now exports a geo.txt in the directory where run with relevant latitude, longitude, and height values to a geo.txt file for ODM or WebODM processing.
+**BETA:** We are currently testing locally on Windows. There are hard paths for things like exiftool that need to be fixed to run universally. We also need to perform manual review of the interpolations and UTC time conversions before using in any serious way.
 
 We're currently only testing with a DJI Mavic 3E RTK, but this should work with other DJI Enterprise drones or Autel drones that export a .MRK file. 
+
+**NEW FEATURE:** The script now exports a geo.txt in the directory where run with relevant latitude, longitude, and height values to a geo.txt file for ODM or WebODM processing.
 
 ## Installation
 
