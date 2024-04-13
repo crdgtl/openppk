@@ -1,7 +1,8 @@
 import os
 from datetime import datetime, timedelta
-
-import os
+import subprocess
+import re
+from tqdm import tqdm
 
 def find_mrk_file(directory):
     # Find the .MRK file in the subdirectories of the specified directory
@@ -21,7 +22,6 @@ def read_mrk_file(mrk_file):
     # Read the .MRK file
     with open(mrk_file, "r") as file:
         lines = file.readlines()
-
     # Parse the .MRK file and calculate UTC times
     data = []
     prev_utc_time = None
@@ -30,23 +30,19 @@ def read_mrk_file(mrk_file):
         try:
             gps_week = int(fields[2].strip("[]"))
             gps_seconds = float(fields[1])
-
             # Calculate UTC time from GPS time
             gps_epoch = datetime(1980, 1, 6)
             elapsed_time = timedelta(weeks=gps_week, seconds=gps_seconds)
             utc_time = gps_epoch + elapsed_time
-
             # Validate that UTC times are different for each new row
             if prev_utc_time is not None and utc_time <= prev_utc_time:
                 print(f"Warning: UTC times are not increasing for row {len(data) + 1}. Continuing with processing...")
             prev_utc_time = utc_time
-
             # Extract all data from the .MRK file
             row_data = fields[:3] + [utc_time] + fields[3:]
             data.append(row_data)
         except (ValueError, IndexError) as e:
             print(f"Error parsing line {len(data) + 1}: {str(e)}. Skipping line.")
-
     return data
 
 def parse_utc_time(utc_time_str, utc_format):
@@ -114,6 +110,98 @@ def write_output_mrk_file(output_data, original_mrk_file):
         file.write("\n".join(output_data))
     print(f"Output file written: {output_file}")
 
+def extract_exif_data(file_path):
+    try:
+        # Construct the ExifTool command
+        exiftool_path = r"C:\Program Files\exiftool.exe"  # Replace with the actual path to exiftool.exe
+        exiftool_cmd = [
+            exiftool_path,
+            '-s',
+            '-s',
+            '-GimbalRollDegree',
+            '-GimbalPitchDegree',
+            '-GimbalYawDegree',
+            '-FileName',
+            file_path
+        ]
+        # Run the ExifTool command and capture the output
+        output = subprocess.check_output(exiftool_cmd, universal_newlines=True)
+        # Parse the output to extract the desired values
+        gimbal_roll = re.search(r'GimbalRollDegree:\s*([-+]?\d+\.\d+)', output)
+        gimbal_pitch = re.search(r'GimbalPitchDegree:\s*([-+]?\d+\.\d+)', output)
+        gimbal_yaw = re.search(r'GimbalYawDegree:\s*([-+]?\d+\.\d+)', output)
+        image_name = re.search(r'FileName:\s*(.+)', output)
+        if gimbal_roll and gimbal_pitch and gimbal_yaw and image_name:
+            gimbal_roll = float(gimbal_roll.group(1))
+            gimbal_pitch = float(gimbal_pitch.group(1))
+            gimbal_yaw = float(gimbal_yaw.group(1))
+            image_name = image_name.group(1)
+            return {
+                'Gimbal Roll': gimbal_roll,
+                'Gimbal Pitch': gimbal_pitch,
+                'Gimbal Yaw': gimbal_yaw,
+                'Image Name': image_name
+            }
+        else:
+            print("Gimbal Roll, Pitch, and Yaw degrees or Image Name not found in the ExifTool output.")
+    except subprocess.CalledProcessError as e:
+        print(f"Error running ExifTool: {e}")
+    except Exception as e:
+        print(f"Error processing file '{file_path}': {e}")
+    return None
+
+def process_geo_txt(script_output, image_dir, proj4_string):
+    # Find the subdirectory containing .JPG images
+    image_subdir = None
+    for root, dirs, files in os.walk(image_dir):
+        for d in dirs:
+            if any(file.endswith(".JPG") for file in os.listdir(os.path.join(root, d))):
+                image_subdir = os.path.join(root, d)
+                break
+        if image_subdir is not None:
+            break
+    if image_subdir is None:
+        print("Error: No subdirectory containing .JPG images found.")
+        return
+
+    # Read the script output and extract the interpolated positions
+    positions = []
+    for line in script_output.split("\n"):
+        fields = line.strip().split("\t")
+        if len(fields) >= 7:
+            positions.append((fields[3], fields[4], fields[5], fields[6]))
+
+    # Check if the number of positions matches the number of .JPG images
+    image_files = [f for f in os.listdir(image_subdir) if f.endswith(".JPG")]
+    if len(positions) != len(image_files):
+        print(f"Error: Number of positions ({len(positions)}) does not match the number of .JPG images ({len(image_files)}).")
+        return
+
+    # Open the geo.txt file for writing
+    with open("geo.txt", "w") as geo_file:
+        # Write the proj.4 string in the first row
+        geo_file.write(f"{proj4_string}\n")
+
+        # Process each image and write the corresponding row to geo.txt
+        for i, image_file in enumerate(tqdm(sorted(image_files), desc="Processing images")):
+            image_path = os.path.join(image_subdir, image_file)
+            exif_data = extract_exif_data(image_path)
+            if exif_data:
+                image_name = exif_data.get('Image Name', '')
+                yaw = str(exif_data.get('Gimbal Yaw', ''))
+                pitch = str(exif_data.get('Gimbal Pitch', ''))
+                roll = str(exif_data.get('Gimbal Roll', ''))
+            else:
+                image_name = image_file
+                yaw = ''
+                pitch = ''
+                roll = ''
+            _, lat, lon, height = positions[i]  # Corrected order of values
+            row = f"{image_name} {lon} {lat} {height} {yaw} {pitch} {roll}\n"
+            geo_file.write(row)
+
+    print("geo.txt file created successfully.")
+
 def main():
     # Get the current working directory
     current_dir = os.getcwd()
@@ -123,24 +211,34 @@ def main():
     except FileNotFoundError as e:
         print(f"Error: {str(e)}")
         return
+
     pos_files = [file for file in os.listdir(current_dir) if file.endswith(".pos")]
     if not pos_files:
         raise FileNotFoundError("No .pos file found in the current directory.")
     if len(pos_files) > 1:
         print("Multiple .pos files found in the current directory. Using the first one.")
     pos_file = os.path.join(current_dir, pos_files[0])
+
     try:
         with open(pos_file, "r") as file:
             pos_data = [line.strip().split() for line in file if not line.startswith("%")]
     except IOError as e:
         raise IOError(f"Error reading .pos file: {str(e)}")
+
     mrk_utc_format = "%Y-%m-%d %H:%M:%S.%f"  # Update this with the correct format for the MRK file
     pos_utc_format = "%Y/%m/%d %H:%M:%S.%f"  # Update this with the correct format for the POS file
+
     mrk_data = read_mrk_file(mrk_file)
     output_data = process_mrk_file(mrk_data, pos_data, mrk_utc_format, pos_utc_format)
+
     if output_data:
         write_output_mrk_file(output_data, mrk_file)
         print(f"Processed {mrk_file} and created POS-{os.path.basename(mrk_file)} in the current directory.")
+
+        # Prompt the user for the proj.4 string
+        proj4_string = input("Please enter the proj.4 string for your coordinate system: ")
+
+        process_geo_txt("\n".join(output_data), current_dir, proj4_string)
 
 if __name__ == "__main__":
     try:
